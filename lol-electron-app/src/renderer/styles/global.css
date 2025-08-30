@@ -1,0 +1,82 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #0f1b1c;
+  color: #c8aa6e;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+.loading-spinner {
+  border: 2px solid #463714;
+  border-top: 2px solid #c8aa6e;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  animation: spin 1s linear infinite;
+  margin: 0 auto;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.connection-spinner {
+  border: 4px solid #463714;
+  border-top: 4px solid #c8aa6e;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  animation: spin 1s linear infinite;
+  margin: 20px auto;
+}
+
+.turn-pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #1e9f39;
+  animation: pulse 1s ease-in-out infinite alternate;
+  margin-right: 8px;
+}
+
+@keyframes pulse {
+  from {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+scrollbar-width: thin;
+scrollbar-color: #c8aa6e #1e2328;
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e2328;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c8aa6e;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #f0e6d2;
+}

@@ -4,21 +4,22 @@ This directory contains comprehensive documentation for two popular League of Le
 
 ## 📚 Libraries Included
 
-### 1. lol-js
-**Location:** [`./lol-js/README.md`](./lol-js/README.md)
+### 1. Twisted
+**Location:** [`./twisted/README.md`](./twisted/README.md)
 
-- **Purpose:** Node.js bindings for the Riot Games API for League of Legends
-- **Author:** jwalton
-- **GitHub:** https://github.com/jwalton/lol-js
-- **Stars:** 27
+- **Purpose:** Modern League of Legends API wrapper for Node.js
+- **Author:** sansossio
+- **GitHub:** https://github.com/sansossio/twisted
+- **NPM:** https://www.npmjs.com/package/twisted
 - **License:** MIT
 
 **Key Features:**
-- Support for multiple Riot API endpoints (game-v1.3, match-v2.2, summoner-v1.4, etc.)
-- Native promise support
-- Built-in rate limiting
-- Flexible caching (Redis, in-memory, custom)
-- Well-documented API functions
+- Automatic rate limit handling with configurable retry attempts
+- Support for League of Legends, Teamfight Tactics, and Riot Account APIs
+- Modern JavaScript with full async/await support
+- TypeScript definitions included
+- Configurable concurrency and debug logging
+- Comprehensive endpoint coverage
 
 ### 2. Hexgate
 **Location:** [`./hexgate/README.md`](./hexgate/README.md)
@@ -48,11 +49,12 @@ This directory contains comprehensive documentation for two popular League of Le
 
 ## 📖 Usage Notes
 
-### lol-js
+### Twisted
 - Requires a Riot Games API key
-- Supports both callback and promise-based usage
-- Extensive caching options available
-- Rate limiting built-in to prevent API abuse
+- Modern async/await API design
+- Automatic rate limiting with retry mechanisms
+- Support for multiple Riot game APIs (LoL, TFT, Account)
+- Built-in TypeScript support
 
 ### Hexgate
 - Works with the League Client Update (LCU) API
@@ -62,7 +64,7 @@ This directory contains comprehensive documentation for two popular League of Le
 
 ## 🏗️ API Types
 
-- **lol-js:** External Riot Games API (requires API key)
+- **Twisted:** External Riot Games API (requires API key)
 - **Hexgate:** Internal LCU API (local client communication)
 
 ## 📝 Documentation Structure
