@@ -116,3 +116,43 @@ export interface RunePage {
   selectedPerkIds: number[];
   subStyleId: number;
 }
+
+// Native LCU client types
+export interface LcuCredentials {
+  port: number;
+  password: string;
+  protocol: string;
+  pid: number;
+  name: string;
+}
+
+export interface LcuConnectionConfig {
+  interval?: number;
+  onStatusChange?: (status: LcuConnectionStatus) => void;
+  onConnect?: (connection: { credentials: LcuCredentials }) => void;
+  onDisconnect?: (disconnection: { connect: () => void }) => void;
+}
+
+export interface LcuRequestOptions {
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  body?: any;
+  headers?: Record<string, string>;
+}
+
+export interface LcuHttpResponse {
+  status: number;
+  statusText: string;
+  data: any;
+}
+
+export class LcuError extends Error {
+  public code?: string;
+  public status?: number;
+
+  constructor(message: string, code?: string, status?: number) {
+    super(message);
+    this.name = 'LcuError';
+    this.code = code;
+    this.status = status;
+  }
+}

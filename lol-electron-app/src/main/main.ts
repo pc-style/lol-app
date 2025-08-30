@@ -1,13 +1,17 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
-import { Connection, Hexgate as HttpsClient } from 'hexgate';
-import type { LcuConnectionStatus } from './types';
+import { LcuConnection } from './lcu-connection';
+import { LcuClient } from './lcu-client';
+import { ChampionSelectLogger } from './champion-select-logger';
+import type { LcuConnectionStatus, LcuCredentials } from './types';
 
 class LolElectronApp {
   private mainWindow: BrowserWindow | null = null;
-  private lcuConnection: any = null;
-  private httpClient: any = null;
+  private lcuConnection: LcuConnection | null = null;
+  private lcuClient: LcuClient | null = null;
+  private championSelectLogger: ChampionSelectLogger | null = null;
   private connectionStatus: LcuConnectionStatus = 'disconnected';
+  private isInChampionSelect = false;
 
   constructor() {
     this.initializeApp();
@@ -64,27 +68,7 @@ class LolElectronApp {
   }
 
   private initializeLCU() {
-    this.lcuConnection = new Connection({
-      createRecipe({ build, unwrap }) {
-        return {
-          getCurrentSummoner: unwrap(
-            build('/lol-summoner/v1/current-summoner').method('get').create()
-          ),
-          getChampSelectSession: unwrap(
-            build('/lol-champ-select/v1/session').method('get').create()
-          ),
-          getOwnedChampions: unwrap(
-            build('/lol-champions/v1/owned-champions-minimal').method('get').create()
-          ),
-          getCurrentGameData: unwrap(
-            build('/lol-gameflow/v1/gameflow-phase').method('get').create()
-          ),
-          getRunePages: unwrap(
-            build('/lol-perks/v1/pages').method('get').create()
-          ),
-          createRunePage: build('/lol-perks/v1/pages').method('post').create()
-        };
-      },
+    this.lcuConnection = new LcuConnection({
       onStatusChange: (status) => {
         console.log('LCU Connection Status:', status);
         this.connectionStatus = status as LcuConnectionStatus;
@@ -93,38 +77,60 @@ class LolElectronApp {
       onConnect: async (connection) => {
         console.log('Connected to League Client');
         try {
-          // Create HTTP client for champion select actions
-          this.httpClient = new HttpsClient(connection.credentials);
+          // Create LCU client for API requests
+          this.lcuClient = new LcuClient(connection.credentials);
           
-          const summoner = await connection.recipe.getCurrentSummoner();
+          const summoner = await this.lcuClient.request('/lol-summoner/v1/current-summoner');
           console.log(`Welcome, ${summoner.displayName}!`);
           console.log('Summoner data:', JSON.stringify(summoner, null, 2));
           
           // Get owned champions immediately on connect
-          const champions = await connection.recipe.getOwnedChampions();
+          const champions = await this.lcuClient.request('/lol-champions/v1/owned-champions-minimal');
           console.log(`Found ${champions.length} owned champions`);
           console.log('Sample champion data:', JSON.stringify(champions[0], null, 2));
           
           // Check ownership status
-          const actuallyOwned = champions.filter(c => c.ownership?.owned);
-          const freeToPlay = champions.filter(c => c.freeToPlay && !c.ownership?.owned);
+          const actuallyOwned = champions.filter((c: any) => c.ownership?.owned);
+          const freeToPlay = champions.filter((c: any) => c.freeToPlay && !c.ownership?.owned);
           console.log(`Actually owned: ${actuallyOwned.length}, Free to play: ${freeToPlay.length}`);
           
           this.sendToRenderer('lcu-connected', { summoner, champions });
           
-          connection.ws.subscribe(
+          // Initialize champion select logger
+          this.championSelectLogger = new ChampionSelectLogger();
+          await this.initializeChampionLogger(champions);
+          
+          // Set up WebSocket subscriptions
+          this.lcuClient.subscribe(
             'OnJsonApiEvent_lol-champ-select_v1_session',
-            (event) => {
+            (event: any) => {
               console.log('Champ Select Event:', event.eventType);
               this.sendToRenderer('champ-select-update', event.data);
+              
+              // Log champion select changes
+              if (event.data && this.championSelectLogger) {
+                this.handleChampionSelectEvent(event.data);
+              }
             }
           );
 
-          connection.ws.subscribe(
+          this.lcuClient.subscribe(
             'OnJsonApiEvent_lol-gameflow_v1_gameflow-phase',
-            (event) => {
+            (event: any) => {
               console.log('Game Flow Event:', event.data);
               this.sendToRenderer('gameflow-update', event.data);
+              
+              // Handle champion select session lifecycle
+              if (event.data === 'ChampSelect' && !this.isInChampionSelect) {
+                this.isInChampionSelect = true;
+                console.log('🎮 Champion Select started - logging enabled');
+              } else if (event.data !== 'ChampSelect' && this.isInChampionSelect) {
+                this.isInChampionSelect = false;
+                console.log('🎮 Champion Select ended - stopping logger');
+                if (this.championSelectLogger) {
+                  this.championSelectLogger.endSession();
+                }
+              }
             }
           );
 
@@ -136,6 +142,12 @@ class LolElectronApp {
       onDisconnect: async (disconnection) => {
         console.log('Disconnected from League Client');
         this.sendToRenderer('lcu-disconnected');
+        
+        // Clean up LCU client
+        if (this.lcuClient) {
+          this.lcuClient.disconnect();
+          this.lcuClient = null;
+        }
         
         setTimeout(() => {
           disconnection.connect();
@@ -153,54 +165,54 @@ class LolElectronApp {
     });
 
     ipcMain.handle('get-current-summoner', async () => {
-      if (!this.lcuConnection || this.connectionStatus !== 'connected') {
+      if (!this.lcuClient || this.connectionStatus !== 'connected') {
         throw new Error('Not connected to League Client');
       }
-      return await this.lcuConnection?.recipe?.getCurrentSummoner();
+      return await this.lcuClient.request('/lol-summoner/v1/current-summoner');
     });
 
     ipcMain.handle('get-champ-select-session', async () => {
-      if (!this.lcuConnection || this.connectionStatus !== 'connected') {
+      if (!this.lcuClient || this.connectionStatus !== 'connected') {
         return null;
       }
       try {
-        return await this.lcuConnection?.recipe?.getChampSelectSession();
+        return await this.lcuClient.request('/lol-champ-select/v1/session');
       } catch (error) {
         return null;
       }
     });
 
     ipcMain.handle('get-owned-champions', async () => {
-      if (!this.lcuConnection || this.connectionStatus !== 'connected') {
+      if (!this.lcuClient || this.connectionStatus !== 'connected') {
         return [];
       }
-      return await this.lcuConnection?.recipe?.getOwnedChampions();
+      return await this.lcuClient.request('/lol-champions/v1/owned-champions-minimal');
     });
 
     ipcMain.handle('create-rune-page', async (_, runePageData) => {
-      if (!this.lcuConnection || this.connectionStatus !== 'connected') {
+      if (!this.lcuClient || this.connectionStatus !== 'connected') {
         throw new Error('Not connected to League Client');
       }
-      return await this.lcuConnection?.recipe?.createRunePage(runePageData);
+      return await this.lcuClient.request('/lol-perks/v1/pages', {
+        method: 'POST',
+        body: runePageData
+      });
     });
 
     ipcMain.handle('pick-champion', async (_, actionId: number, championId: number) => {
-      if (!this.httpClient || this.connectionStatus !== 'connected') {
+      if (!this.lcuClient || this.connectionStatus !== 'connected') {
         throw new Error('Not connected to League Client');
       }
       console.log(`Picking champion ${championId} for action ${actionId}`);
       
       try {
-        // Create the pick champion function using httpClient builder
-        const pickChampion = this.httpClient
-          .build(`/lol-champ-select/v1/session/actions/${actionId}`)
-          .method('patch')
-          .create();
-        
-        const result = await pickChampion({
-          championId: championId,
-          completed: false,
-          type: "pick"
+        const result = await this.lcuClient.request(`/lol-champ-select/v1/session/actions/${actionId}`, {
+          method: 'PATCH',
+          body: {
+            championId: championId,
+            completed: false,
+            type: "pick"
+          }
         });
         
         console.log('Champion picked successfully:', result);
@@ -208,8 +220,7 @@ class LolElectronApp {
           success: true, 
           championId,
           actionId,
-          status: result.status,
-          statusText: result.statusText
+          result
         };
       } catch (error) {
         console.error('Error picking champion:', error);
@@ -218,26 +229,22 @@ class LolElectronApp {
     });
 
     ipcMain.handle('lock-in-champion', async (_, actionId: number) => {
-      if (!this.httpClient || this.connectionStatus !== 'connected') {
+      if (!this.lcuClient || this.connectionStatus !== 'connected') {
         throw new Error('Not connected to League Client');
       }
       console.log(`Locking in champion for action ${actionId}`);
       
       try {
-        // Create the lock in function using httpClient builder
-        const lockInAction = this.httpClient
-          .build(`/lol-champ-select/v1/session/actions/${actionId}/complete`)
-          .method('post')
-          .create();
-        
-        const result = await lockInAction({});
+        const result = await this.lcuClient.request(`/lol-champ-select/v1/session/actions/${actionId}/complete`, {
+          method: 'POST',
+          body: {}
+        });
         
         console.log('Champion locked in successfully:', result);
         return { 
           success: true, 
           actionId,
-          status: result.status,
-          statusText: result.statusText
+          result
         };
       } catch (error) {
         console.error('Error locking in champion:', error);
@@ -246,22 +253,19 @@ class LolElectronApp {
     });
 
     ipcMain.handle('ban-champion', async (_, actionId: number, championId: number) => {
-      if (!this.httpClient || this.connectionStatus !== 'connected') {
+      if (!this.lcuClient || this.connectionStatus !== 'connected') {
         throw new Error('Not connected to League Client');
       }
       console.log(`Banning champion ${championId} for action ${actionId}`);
       
       try {
-        // Create the ban champion function using httpClient builder
-        const banChampion = this.httpClient
-          .build(`/lol-champ-select/v1/session/actions/${actionId}`)
-          .method('patch')
-          .create();
-        
-        const result = await banChampion({
-          championId: championId,
-          completed: false,
-          type: "ban"
+        const result = await this.lcuClient.request(`/lol-champ-select/v1/session/actions/${actionId}`, {
+          method: 'PATCH',
+          body: {
+            championId: championId,
+            completed: false,
+            type: "ban"
+          }
         });
         
         console.log('Champion banned successfully:', result);
@@ -269,8 +273,7 @@ class LolElectronApp {
           success: true, 
           championId,
           actionId,
-          status: result.status,
-          statusText: result.statusText
+          result
         };
       } catch (error) {
         console.error('Error banning champion:', error);
@@ -282,6 +285,50 @@ class LolElectronApp {
   private sendToRenderer(channel: string, data?: any) {
     if (this.mainWindow && this.mainWindow.webContents) {
       this.mainWindow.webContents.send(channel, data);
+    }
+  }
+
+  private async initializeChampionLogger(champions: any[]): Promise<void> {
+    if (!this.championSelectLogger) return;
+    
+    try {
+      // Get all champions data for name mapping
+      const allChampions = await this.lcuClient!.request('/lol-champions/v1/champions');
+      
+      // Create champion name mapping
+      const championData = allChampions.map((champ: any) => ({
+        id: champ.id,
+        name: champ.name
+      }));
+      
+      await this.championSelectLogger.setChampionData(championData);
+      console.log(`🎮 Champion Select Logger initialized with ${championData.length} champions`);
+    } catch (error) {
+      console.error('Failed to initialize champion logger:', error);
+      if (this.championSelectLogger) {
+        this.championSelectLogger.logError(`Failed to initialize: ${error}`);
+      }
+    }
+  }
+
+  private async handleChampionSelectEvent(championSelectData: any): Promise<void> {
+    if (!this.championSelectLogger || !this.isInChampionSelect) return;
+    
+    try {
+      // Transform the LCU data to match our logger interface
+      const loggerData = {
+        actions: championSelectData.actions || [],
+        timer: championSelectData.timer || { phase: 'unknown', timeRemaining: 0, totalTime: 0 },
+        myTeam: championSelectData.myTeam || [],
+        theirTeam: championSelectData.theirTeam || []
+      };
+      
+      await this.championSelectLogger.logChampionSelectUpdate(loggerData);
+    } catch (error) {
+      console.error('Error handling champion select event:', error);
+      if (this.championSelectLogger) {
+        this.championSelectLogger.logError(`Event handling error: ${error}`);
+      }
     }
   }
 }
